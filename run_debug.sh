@@ -1,5 +1,4 @@
 #!/bin/bash
-# Zatrzymaj skrypt w przypadku błędu
 set -e
 
 echo "=== KOMPILACJA TRYBU DEBUG ==="

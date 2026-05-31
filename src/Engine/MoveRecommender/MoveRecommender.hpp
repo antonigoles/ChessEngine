@@ -1,8 +1,8 @@
 #pragma once
+#include "Engine/MoveRecommender/TTCache.hpp"
 #include <chrono>
 #include <Engine/Support/ChessMove.hpp>
 #include <Engine/Support/GameState/GameState.hpp>
-#include <unordered_set>
 
 class MoveRecommender
 {
@@ -10,7 +10,12 @@ private:
     std::chrono::_V2::steady_clock::time_point search_start;
     double time_limit;
 
-    std::unordered_set<uint64_t> state_cache;
+    TTCache tt_cache;
+
+    ChessMove killer_moves[64][2];
+
+    // Format: [Color][From][To]
+    int32_t history_table[2][64][64];
 
 public:
     MoveRecommender();
@@ -20,11 +25,30 @@ public:
     void reset_round_timer();
 
     float alpha_beta_search(
-        const GameState &state, 
+        const GameState &state,
+        std::vector<uint64_t>& history,
         ssize_t depth,
         float alpha,
-        float beta
+        float beta,
+        bool allow_null
     );
 
-    std::optional<ChessMove> recommend_next_move(GameState &game_state, double time_for_search, int min_depth = 1, int max_depth = 4);
+    std::optional<ChessMove> recommend_next_move(
+        GameState &game_state, 
+        double time_for_search, 
+        std::vector<uint64_t>& history,
+        int min_depth = 1, 
+        int max_depth = 4
+    );
+
+    void clear_heuristics() {
+        for (int i = 0; i < 64; i++) {
+            killer_moves[i][0] = ChessMove();
+            killer_moves[i][1] = ChessMove();
+        }
+        for (int c = 0; c < 2; c++)
+            for (int from = 0; from < 64; from++)
+                for (int to = 0; to < 64; to++)
+                    history_table[c][from][to] = 0;
+    }
 };

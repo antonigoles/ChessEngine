@@ -1,7 +1,9 @@
 #include "Engine/Support/Consts.hpp"
 #include <Engine/PreparedData/PreparedData.hpp>
 #include <cstdint>
+#include <format>
 #include <iostream>
+#include <Engine/PreparedData/Zobrist.hpp>
 #include <vector>
 
 void PreparedData::calculate_knights()
@@ -326,80 +328,100 @@ void PreparedData::pawn_structure_masks()
     }
 }
 
+void PreparedData::dump_magic()
+{
+    // 1. dump storage
+    // static uint64_t rook_attacks_storage[102400];
+    // static uint64_t bishop_attacks_storage[5248];
+    std::cout << "#pragma once\n";
+
+    std::cout << "static uint64_t rook_attacks_storage[102400] = {\n";
+    for (int i = 0; i < 102400; i++) {
+        if ((i+1) % 10 == 0) std::cout << "\n";
+        std::cout << std::format("{:#x}", rook_attacks_storage[i]) << (i+1 == 102400 ? "" : ",");
+    }
+    std::cout << "};\n";
+
+    std::cout << "static uint64_t bishop_attacks_storage[5248] = {\n";
+    for (int i = 0; i < 5248; i++) {
+        if ((i+1) % 10 == 0) std::cout << "\n";
+        std::cout << std::format("{:#x}", bishop_attacks_storage[i]) << (i+1 == 102400 ? "" : ",");
+    }
+    std::cout << "};\n";
+
+    // 2. dump magic (rooks first)
+    std::cout << "Magic rook_magic_table[64] = {\n";
+    for (int i = 0; i<64; i++) {
+        int att_idx = PreparedData::rook_magic_table[i].attacks - rook_attacks_storage;
+        std::cout << "    { &rook_attacks_storage[" << att_idx << "], " 
+            << std::format("{:#x}", PreparedData::rook_magic_table[i].mask) << ", "
+            << std::format("{:#x}", PreparedData::rook_magic_table[i].magic) << ", "
+            << (int)PreparedData::rook_magic_table[i].shift
+            << " },\n";
+    }
+    std::cout << "};\n";
+
+    // 3. dump magic (bishops now)
+    std::cout << "Magic bishop_magic_table[64] = {\n";
+    for (int i = 0; i<64; i++) {
+        int att_idx = PreparedData::bishop_magic_table[i].attacks - bishop_attacks_storage;
+        std::cout << "    { &bishop_attacks_storage[" << att_idx << "], " 
+            << std::format("{:#x}", PreparedData::bishop_magic_table[i].mask) << ", "
+            << std::format("{:#x}", PreparedData::bishop_magic_table[i].magic) << ", "
+            << (int)PreparedData::bishop_magic_table[i].shift
+            << " },\n";
+    }
+    std::cout << "};\n";
+}
+
+static inline void calculate_king_safety_ring()
+{
+    for (int sq = 0; sq < 64; sq++) {
+        uint64_t inner_ring = 0;
+        uint64_t outer_ring = 0;
+        int k_file = sq % 8;
+        int k_rank = sq / 8;
+        int start_rank = std::max(0, k_rank - 2);
+        int end_rank   = std::min(7, k_rank + 2);
+        int start_file = std::max(0, k_file - 2);
+        int end_file   = std::min(7, k_file + 2);
+        for (int r = start_rank; r <= end_rank; r++) {
+            for (int f = start_file; f <= end_file; f++) {
+                int target_sq = r * 8 + f;
+                uint64_t target_mask = 1ULL << target_sq;
+                if (std::abs(r - k_rank) <= 1 && std::abs(f - k_file) <= 1) {
+                    inner_ring |= target_mask;
+                }
+                outer_ring |= target_mask;
+            }
+        }
+
+        PreparedData::king_safety_ring_mask[sq] = outer_ring;
+    }
+}
+
 void PreparedData::run_calculations()
 {
     PreparedData::calculate_knights();
+    std::cerr << "calculate_knights\n";
+
     PreparedData::calculate_rooks();
+    std::cerr << "calculate_rooks\n";
+
     PreparedData::calculate_bishops();
-    PreparedData::calculate_rooks_magic();
-    PreparedData::calculate_bishops_magic();
+    std::cerr << "calculate_bishops\n";
+    // PreparedData::calculate_rooks_magic();
+    // PreparedData::calculate_bishops_magic();
     PreparedData::calculate_kings();
-    PreparedData::calculate_pawns();
-    PreparedData::pawn_structure_masks();
-    Zobrist::init();
-};
-
-void Zobrist::init() 
-{
-    const int polyglot_piece_map[6] = {2, 4, 6, 8, 0, 10};
-
-    for (int c = 0; c < 2; c++) {
-        for (int p = 0; p < 6; p++) {
-            int poly_piece = polyglot_piece_map[p] + (c == WHITE ? 1 : 0);
-            for (int sq = 0; sq < 64; sq++) {
-                piece_keys[c][p][sq] = Polyglot_Random64[64 * poly_piece + sq];
-            }
-        }
-    }
-
-    for (int file = 0; file < 8; file++) {
-        en_passant_keys[file] = Polyglot_Random64[772 + file];
-    }
-
-    for (int i = 0; i < 16; i++) {
-        uint64_t k = 0;
-        if (i & 1) k ^= Polyglot_Random64[768];
-        if (i & 2) k ^= Polyglot_Random64[769];
-        if (i & 4) k ^= Polyglot_Random64[770];
-        if (i & 8) k ^= Polyglot_Random64[771];
-        castle_keys[i] = k;
-    }
-
-    side_to_move_key = Polyglot_Random64[780];
-}; 
-
-uint64_t Zobrist::generate_key(const GameState& state)
-{
-    uint64_t key = 0;
-
-    for (int c = 0; c < 2; c++) {
-        for (int p = 0; p < 6; p++) {
-            uint64_t bb = state.bitboards[c][p];
-            while (bb) {
-                int sq = std::countr_zero(bb);
-                key ^= piece_keys[c][p][sq];
-                bb &= bb - 1; 
-            }
-        }
-    }
-
-    if (state.aux.can_en_passant()) {
-        int ep_sq = state.aux.en_passant_square();
-        int file = ep_sq % 8; 
-        key ^= en_passant_keys[file];
-    }
-
-    int castle_rights = 0;
-    if (state.aux.can_white_short_castle()) castle_rights |= 1;
-    if (state.aux.can_white_long_castle())  castle_rights |= 2;
-    if (state.aux.can_black_short_castle()) castle_rights |= 4;
-    if (state.aux.can_black_long_castle())  castle_rights |= 8;
+    calculate_king_safety_ring();
+    std::cerr << "calculate_kings\n";
     
-    key ^= castle_keys[castle_rights];
-
-    if (state.aux.get_turn() == WHITE) { 
-        key ^= side_to_move_key;
-    }
-
-    return key;
+    PreparedData::calculate_pawns();
+    std::cerr << "calculate_pawns\n";
+    
+    PreparedData::pawn_structure_masks();
+    std::cerr << "pawn_structure_masks\n";
+    
+    Zobrist::init();
+    std::cerr << "Zobrist\n";
 };

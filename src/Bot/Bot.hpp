@@ -12,6 +12,8 @@ public:
     int min_depth = 1;
     int max_depth = 8;
 
+    std::vector<uint64_t> history;
+
     Bot(int min_depth, int max_depth);
 
     void reset();

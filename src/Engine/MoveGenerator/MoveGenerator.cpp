@@ -1,5 +1,6 @@
 #include "Engine/MoveGenerator/PawnMoves.hpp"
 #include "Engine/PreparedData/PreparedData.hpp"
+#include "Engine/PreparedData/magic.hpp"
 #include "Engine/Support/ChessMove.hpp"
 #include "Engine/Support/Consts.hpp"
 #include <Engine/MoveGenerator/MoveGenerator.hpp>
@@ -7,16 +8,16 @@
 
 uint64_t MoveGenerator::get_rook_attacks(uint64_t from, uint64_t occupancy)
 {
-    uint64_t blockers = occupancy & PreparedData::rook_magic_table[from].mask;
-    uint64_t index = (blockers * PreparedData::rook_magic_table[from].magic) >> PreparedData::rook_magic_table[from].shift;
-    return PreparedData::rook_magic_table[from].attacks[index];
+    uint64_t blockers = occupancy & InlinedMagic::rook_magic_table[from].mask;
+    uint64_t index = (blockers * InlinedMagic::rook_magic_table[from].magic) >> InlinedMagic::rook_magic_table[from].shift;
+    return InlinedMagic::rook_magic_table[from].attacks[index];
 }
  
 uint64_t MoveGenerator::get_bishop_attacks(uint64_t from, uint64_t occupancy)
 {
-    uint64_t blockers = occupancy & PreparedData::bishop_magic_table[from].mask;
-    uint64_t index = (blockers * PreparedData::bishop_magic_table[from].magic) >> PreparedData::bishop_magic_table[from].shift;
-    return PreparedData::bishop_magic_table[from].attacks[index];
+    uint64_t blockers = occupancy & InlinedMagic::bishop_magic_table[from].mask;
+    uint64_t index = (blockers * InlinedMagic::bishop_magic_table[from].magic) >> InlinedMagic::bishop_magic_table[from].shift;
+    return InlinedMagic::bishop_magic_table[from].attacks[index];
 }
 
 template <Color Them>

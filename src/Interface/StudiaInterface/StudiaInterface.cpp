@@ -4,9 +4,6 @@
 
 void StudiaInterface::run(Bot& bot)
 {
-    std::ios_base::sync_with_stdio(false);
-    std::cin.tie(NULL);
-    
     std::cout << "RDY" << std::endl;
 
     std::string line;

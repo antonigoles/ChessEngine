@@ -41,6 +41,16 @@ public:
         data |= (uint32_t)(full_move_counter & 0b11111111111111) << 18; // 14 bit long
     }
 
+    inline void set_turn(Color color)
+    {
+        data = (data & ~1U) | ((uint32_t)color & 1U);
+    }
+
+    inline void clear_en_passant() 
+    {
+        data &= ~(1U << 11);
+    }
+
     inline Color get_turn() const
     {
         return (Color)(data & 0b1);

@@ -7,8 +7,9 @@
 #include <bit>
 #include <cstdint>
 #include <cstdlib>
+#include <Engine/PreparedData/Zobrist.hpp>
 
-void recalculate_pawn_structure_score(GameState& state)
+static inline void recalculate_pawn_structure_score(GameState& state)
 {
     state.pawn_structure_score = 0.0f;
 
@@ -18,14 +19,14 @@ void recalculate_pawn_structure_score(GameState& state)
     // 1. king safety - basically if there are pawns in front of the king
 
     // 1a. FIRST WHITE
-    uint64_t king_pos = 1ULL << std::popcount(state.bitboards[WHITE][KING]);
+    uint64_t king_pos = std::countr_zero(state.bitboards[WHITE][KING]);
     uint64_t shield_mask = PreparedData::king_safety_mask[WHITE][king_pos];
     uint64_t active_shield = shield_mask & state.bitboards[WHITE][PAWN];
     int pawns_in_front = std::popcount(active_shield);
     state.pawn_structure_score += ((float)pawns_in_front - 1.5f) * 50.0f;
 
     // 2a. NOW BLACK
-    king_pos = 1ULL << std::popcount(state.bitboards[BLACK][KING]);
+    king_pos = std::countr_zero(state.bitboards[BLACK][KING]);
     shield_mask = PreparedData::king_safety_mask[BLACK][king_pos];
     active_shield = shield_mask & state.bitboards[BLACK][PAWN];
     pawns_in_front = std::popcount(active_shield);
@@ -86,7 +87,40 @@ void recalculate_pawn_structure_score(GameState& state)
     }
 }
 
+static inline void recalculate_king_safety_score(GameState& state)
+{
+    state.king_safety_score = 0.0f;
 
+    // 1. We should probably not want to be checked
+    state.king_safety_score += (state.is_checked * 200.0f) * (state.aux.get_turn() == WHITE ? -1 : 1);
+
+    // 2. Check attacked fields around king depending on piece
+    uint64_t white_king_pos = std::countr_zero(state.bitboards[WHITE][KING]);
+    uint64_t black_king_pos = std::countr_zero(state.bitboards[BLACK][KING]);
+
+    // QUEEN
+    state.king_safety_score -= 500.0f * std::popcount(state.bitboards[BLACK][QUEEN] & PreparedData::king_safety_ring_mask[white_king_pos]);
+    state.king_safety_score += 500.0f * std::popcount(state.bitboards[WHITE][QUEEN] & PreparedData::king_safety_ring_mask[black_king_pos]);
+
+    // ROOK
+    state.king_safety_score -= 200.0f * std::popcount(state.bitboards[BLACK][ROOK] & PreparedData::king_safety_ring_mask[white_king_pos]);
+    state.king_safety_score += 200.0f * std::popcount(state.bitboards[WHITE][ROOK] & PreparedData::king_safety_ring_mask[black_king_pos]);
+
+    // HORSE
+    state.king_safety_score -= 200.0f * std::popcount(state.bitboards[BLACK][KNIGHT] & PreparedData::king_safety_ring_mask[white_king_pos]);
+    state.king_safety_score += 200.0f * std::popcount(state.bitboards[WHITE][KNIGHT] & PreparedData::king_safety_ring_mask[black_king_pos]);
+
+    uint64_t white_attackers = 10 * std::popcount(
+        (state.occupancy[BLACK] & ~state.bitboards[BLACK][PAWN]) & PreparedData::king_safety_ring_mask[white_king_pos]
+    );
+
+    uint64_t black_attackers = 10 * std::popcount(
+        (state.occupancy[WHITE] & ~state.bitboards[WHITE][PAWN]) & PreparedData::king_safety_ring_mask[black_king_pos]
+    );
+
+    state.king_safety_score -= white_attackers * white_attackers;
+    state.king_safety_score += black_attackers * black_attackers;
+}
 
 static inline bool is_end_game_test(GameState& state)
 {
@@ -109,10 +143,9 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
     if (state.aux.can_black_short_castle()) old_castle_rights |= 4;
     if (state.aux.can_black_long_castle())  old_castle_rights |= 8;
 
-    bool old_has_ep = state.aux.can_en_passant();
-    int old_ep_file = old_has_ep ? (state.aux.en_passant_square() % 8) : 0;
+    bool old_has_ep = Zobrist::is_polyglot_ep_active(state);
+    int old_ep_file = state.aux.can_en_passant() ? (state.aux.en_passant_square() % 8) : 0;
 
-    // TODO: Make "is_end_game" test smarter
     bool is_end_game = is_end_game_test(state);
 
     float new_evaluation_score = state.evaluation_score;
@@ -278,6 +311,7 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
     }
 
     recalculate_pawn_structure_score(state);
+    recalculate_king_safety_score(state);
 
     if (us == WHITE) {
         state.is_checked = MoveGenerator::is_our_king_in_check<BLACK>(state);
@@ -289,7 +323,6 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
 
     state.zobrist_key ^= Zobrist::side_to_move_key;
     state.zobrist_key ^= Zobrist::piece_keys[us][moving_piece][from];
-    state.zobrist_key ^= Zobrist::piece_keys[us][moving_piece][to];
 
     if (move.has_promotion()) {
         state.zobrist_key ^= Zobrist::piece_keys[us][move.get_promotion()][to];
@@ -329,9 +362,10 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
     if (old_has_ep) {
         state.zobrist_key ^= Zobrist::en_passant_keys[old_ep_file];
     }
-    if (ep_square_this_turn != -1) {
-        state.zobrist_key ^= Zobrist::en_passant_keys[ep_square_this_turn % 8];
+    
+    if (Zobrist::is_polyglot_ep_active(state)) {
+        state.zobrist_key ^= Zobrist::en_passant_keys[state.aux.en_passant_square() % 8];
     }
-
+    
     return true;
 }

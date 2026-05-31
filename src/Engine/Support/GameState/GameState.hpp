@@ -11,6 +11,7 @@ class GameState {
 public:
     float evaluation_score = 0.0f;
     float pawn_structure_score = 0.0f;
+    float king_safety_score = 0.0f;
 
     bool is_checked = false;
 
@@ -51,14 +52,11 @@ public:
         evaluation_score = 0;
     }
 
-    void reset() {
-        this->load_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-        this->zobrist_key = 0;
-    }
+    void reset();
 
     float eval_position() const
     {
-        return evaluation_score + pawn_structure_score;
+        return evaluation_score + pawn_structure_score + king_safety_score;
     }
 
     GameState clone() 
@@ -162,7 +160,7 @@ public:
 
         // En passant target square
         bool is_enpassant = parts[3] != "-";
-        uint8_t en_passant_position = is_enpassant ? 8 * (parts[3][0]-'a') + (parts[3][1]-'0') : 0;
+        uint8_t en_passant_position = is_enpassant ? (parts[3][0]-'a') + 8 * (parts[3][1]-'1') : 0;
 
         // Half moves
         uint8_t half_moves = std::stoi(parts[4]);
