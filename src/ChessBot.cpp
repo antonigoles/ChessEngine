@@ -77,7 +77,7 @@ void test_game()
         if (!next_move.has_value()) break;
         StateTransformer::apply_move(state, *next_move);
         state.print_position();
-        std::cout << "eval: " << state.evaluation_score << "\n";
+        std::cout << "eval: " << state.eval_position() << "\n";
         std::cout << "Move: " << state.aux.full_move_count() << "\n";
     }
 }

@@ -1,6 +1,8 @@
 #include "Engine/OpeningTree/OpeningTree.hpp"
 #include "Engine/StateTransformer/StateTransformer.hpp"
 #include "Engine/Support/ChessMove.hpp"
+#include "Engine/Support/Consts.hpp"
+#include "Engine/Support/GameState/GameState.hpp"
 #include <Bot/Bot.hpp>
 #include <Engine/MoveRecommender/MoveRecommender.hpp>
 #include <format>
@@ -8,7 +10,7 @@
 
 static double get_time_for_search(double time_for_move, double time_left)
 {
-    return time_left * 0.05 + time_for_move * 0.5;
+    return std::min(time_left * 0.05 + time_for_move * 0.5, time_for_move * 0.66);
 }
 
 Bot::Bot(int min_depth, int max_depth) 
@@ -25,16 +27,30 @@ void Bot::reset() {
     game_state.reset();
     skip_opening_tree = false;
     history.clear();
+    playing_as = BLACK;
+}
+
+static void print_eval(GameState& state, Color playing_as)
+{
+    std::cerr << "Evaluation: (Playing as " << (playing_as == WHITE ? "WHITE": "BLACK") << ")" << state.eval_position() << "\n";
+    std::cerr << " - PST SCORE: " << state.pst_score * PST_SCORE_MULTIPLIER <<  "\n";
+    std::cerr << " - KING SAFETY: " << state.king_safety_score * KING_SAFETY_SCORE_MULTIPLIER <<  "\n";
+    std::cerr << " - PAWN STRUCTURE: " << state.pawn_structure_score * PAWN_STRUCTURE_SCORE_MULTIPLIER <<  "\n";
+    std::cerr << " - MOBILITY: " << state.safe_mobility_score * MOBILITY_SCORE_MULTIPLIER <<  "\n";
+    std::cerr << " - DEVELOPMENT: " << state.development_score * DEVELOPMENT_SCORE_MULTIPLIER <<  "\n";
+    std::cerr << " - ACTIVITY: " << state.active_piece_score * ACTIVE_PIECE_MULTIPLIER <<  "\n";
+    std::cerr << " - SPACE: " << state.space_advantage_score * SPACE_ADVANTAGE_MULTIPLIER <<  "\n";
 }
 
 std::string Bot::make_first_move(double time_for_move, double time_left) {
     this->reset();
+    playing_as = WHITE;
     std::cerr << std::format("{:#x}", this->game_state.zobrist_key) << "\n";
-    // auto next_move = MoveRecommender().recommend_next_move(game_state, get_time_for_search(time_for_move, time_left), min_depth, max_depth);
     auto next_move = ChessMove::from_string("e2e4"); // Start from e4
     StateTransformer::apply_move(this->game_state, next_move);
     this->game_state.print_position();
     std::cerr << std::format("{:#x}", this->game_state.zobrist_key) << "\n";
+    print_eval(this->game_state, playing_as);
     history.push_back(game_state.zobrist_key);
     return next_move.to_string();
 }
@@ -45,7 +61,7 @@ void Bot::apply_opponent_move(const std::string& opponent_move) {
     StateTransformer::apply_move(this->game_state, move);
     this->game_state.print_position();
     std::cerr << std::format("{:#x}", this->game_state.zobrist_key) << "\n";
-    std::cerr << "Evaluation: (Playing as " << (this->game_state.aux.get_turn() == WHITE ? "WHITE" : "BLACK") << ")" << this->game_state.eval_position() << "\n";
+    print_eval(this->game_state, playing_as);
     history.push_back(game_state.zobrist_key);
 }
 
@@ -65,7 +81,7 @@ std::string Bot::make_move(double time_for_move, double time_left, const std::st
     StateTransformer::apply_move(this->game_state, next_move.value());
     this->game_state.print_position();
     std::cerr << std::format("{:#x}", this->game_state.zobrist_key) << "\n";
-    std::cerr << "Evaluation: (Playing as " << (this->game_state.aux.get_turn() == WHITE ? "BLACK" : "WHITE") << ")" << this->game_state.eval_position() << "\n";
+    print_eval(this->game_state, playing_as);
     history.push_back(game_state.zobrist_key);
     return next_move.value().to_string();
 }

@@ -1,6 +1,7 @@
 #include "Engine/MoveGenerator/MoveGenerator.hpp"
 #include "Engine/PreparedData/PreparedData.hpp"
 #include "Engine/Support/Consts.hpp"
+#include "Engine/Support/GameState/GameState.hpp"
 #include "Engine/Support/GameState/GameStateAux.hpp"
 #include "Utils/BitsUtil.hpp"
 #include <Engine/StateTransformer/StateTransformer.hpp>
@@ -9,28 +10,16 @@
 #include <cstdlib>
 #include <Engine/PreparedData/Zobrist.hpp>
 
+static inline uint64_t get_pawn_attacks_mask(Color color, uint64_t pawns)
+{
+    return color == WHITE ? 
+        BitsUtil::shift_cap_west<WHITE>(pawns) | BitsUtil::shift_cap_east<WHITE>(pawns) :
+        BitsUtil::shift_cap_west<BLACK>(pawns) | BitsUtil::shift_cap_east<BLACK>(pawns);
+}
+
 static inline void recalculate_pawn_structure_score(GameState& state)
 {
     state.pawn_structure_score = 0.0f;
-
-    Color us = state.aux.get_turn();
-    Color them = (Color)(!us);
-
-    // 1. king safety - basically if there are pawns in front of the king
-
-    // 1a. FIRST WHITE
-    uint64_t king_pos = std::countr_zero(state.bitboards[WHITE][KING]);
-    uint64_t shield_mask = PreparedData::king_safety_mask[WHITE][king_pos];
-    uint64_t active_shield = shield_mask & state.bitboards[WHITE][PAWN];
-    int pawns_in_front = std::popcount(active_shield);
-    state.pawn_structure_score += ((float)pawns_in_front - 1.5f) * 50.0f;
-
-    // 2a. NOW BLACK
-    king_pos = std::countr_zero(state.bitboards[BLACK][KING]);
-    shield_mask = PreparedData::king_safety_mask[BLACK][king_pos];
-    active_shield = shield_mask & state.bitboards[BLACK][PAWN];
-    pawns_in_front = std::popcount(active_shield);
-    state.pawn_structure_score += -((float)pawns_in_front - 1.5f) * 50.0f;
     
 
     // 2. Pawn structure itself
@@ -57,6 +46,11 @@ static inline void recalculate_pawn_structure_score(GameState& state)
             }
         }
     
+        // Passed pawns
+        if ((PreparedData::passed_pawn_masks[WHITE][sq] & state.bitboards[BLACK][PAWN]) == 0) {
+            int rank = sq / 8; // Rząd od 0 do 7
+            state.pawn_structure_score += PASSED_PAWN_BONUS[rank];
+        }
         
         white_pawns &= white_pawns - 1;
     }
@@ -81,6 +75,12 @@ static inline void recalculate_pawn_structure_score(GameState& state)
                 state.pawn_structure_score += 8.0f;
             }
         }
+
+        // Passed pawns
+        if ((PreparedData::passed_pawn_masks[BLACK][sq] & state.bitboards[WHITE][PAWN]) == 0) {
+            int rank = 7 - (sq / 8); 
+            state.pawn_structure_score -= PASSED_PAWN_BONUS[rank];
+        }
     
         
         black_pawns &= black_pawns - 1;
@@ -89,44 +89,282 @@ static inline void recalculate_pawn_structure_score(GameState& state)
 
 static inline void recalculate_king_safety_score(GameState& state)
 {
-    state.king_safety_score = 0.0f;
+    state.allgame_king_safety_score = 0.0f;
+    state.midgame_king_safety_score = 0.0f;
 
-    // 1. We should probably not want to be checked
-    state.king_safety_score += (state.is_checked * 200.0f) * (state.aux.get_turn() == WHITE ? -1 : 1);
 
-    // 2. Check attacked fields around king depending on piece
+    // 1. Check attacked fields around king depending on piece
     uint64_t white_king_pos = std::countr_zero(state.bitboards[WHITE][KING]);
     uint64_t black_king_pos = std::countr_zero(state.bitboards[BLACK][KING]);
 
-    // QUEEN
-    state.king_safety_score -= 500.0f * std::popcount(state.bitboards[BLACK][QUEEN] & PreparedData::king_safety_ring_mask[white_king_pos]);
-    state.king_safety_score += 500.0f * std::popcount(state.bitboards[WHITE][QUEEN] & PreparedData::king_safety_ring_mask[black_king_pos]);
+    Color us = state.aux.get_turn();
+    Color them = (Color)(!us);
 
-    // ROOK
-    state.king_safety_score -= 200.0f * std::popcount(state.bitboards[BLACK][ROOK] & PreparedData::king_safety_ring_mask[white_king_pos]);
-    state.king_safety_score += 200.0f * std::popcount(state.bitboards[WHITE][ROOK] & PreparedData::king_safety_ring_mask[black_king_pos]);
+    // Are there are pawns in front of the king
 
-    // HORSE
-    state.king_safety_score -= 200.0f * std::popcount(state.bitboards[BLACK][KNIGHT] & PreparedData::king_safety_ring_mask[white_king_pos]);
-    state.king_safety_score += 200.0f * std::popcount(state.bitboards[WHITE][KNIGHT] & PreparedData::king_safety_ring_mask[black_king_pos]);
+    // 1a. FIRST WHITE
+    uint64_t king_pos = std::countr_zero(state.bitboards[WHITE][KING]);
+    uint64_t shield_mask = PreparedData::king_safety_mask[WHITE][king_pos];
+    uint64_t active_shield = shield_mask & state.bitboards[WHITE][PAWN];
+    int pawns_in_front = std::popcount(active_shield);
+    state.midgame_king_safety_score += ((float)pawns_in_front - 1.5f) * 50.0f;
 
-    uint64_t white_attackers = 10 * std::popcount(
-        (state.occupancy[BLACK] & ~state.bitboards[BLACK][PAWN]) & PreparedData::king_safety_ring_mask[white_king_pos]
-    );
+    // 2a. NOW BLACK
+    king_pos = std::countr_zero(state.bitboards[BLACK][KING]);
+    shield_mask = PreparedData::king_safety_mask[BLACK][king_pos];
+    active_shield = shield_mask & state.bitboards[BLACK][PAWN];
+    pawns_in_front = std::popcount(active_shield);
+    state.midgame_king_safety_score += -((float)pawns_in_front - 1.5f) * 50.0f;
 
-    uint64_t black_attackers = 10 * std::popcount(
-        (state.occupancy[WHITE] & ~state.bitboards[WHITE][PAWN]) & PreparedData::king_safety_ring_mask[black_king_pos]
-    );
 
-    state.king_safety_score -= white_attackers * white_attackers;
-    state.king_safety_score += black_attackers * black_attackers;
+
+    uint64_t occ_all = state.total_occupancy;
+    int64_t white_attackers_count = 0;
+    int64_t white_attack_weight = 0;
+
+    int64_t black_attackers_count = 0;
+    int64_t black_attack_weight = 0;
+
+    for (int p = KNIGHT; p <= QUEEN; ++p) {
+        uint64_t bb = state.bitboards[BLACK][p];
+        while (bb) {
+            int sq = std::countr_zero(bb);
+            bb &= (bb - 1);
+
+            uint64_t attacks = 0;
+            switch(p) {
+                case KNIGHT: attacks = PreparedData::knight_attack_table[sq]; break;
+                case BISHOP: attacks = MoveGenerator::get_bishop_attacks(sq, occ_all); break;
+                case ROOK:   attacks = MoveGenerator::get_rook_attacks(sq, occ_all); break;
+                case QUEEN:  
+                    attacks = MoveGenerator::get_bishop_attacks(sq, occ_all) 
+                    | MoveGenerator::get_rook_attacks(sq, occ_all); 
+                    break;
+            }
+
+            if (attacks & PreparedData::king_safety_ring_mask_small[white_king_pos]) {
+                white_attackers_count++;
+                white_attack_weight += ATTACK_WEIGHT[p];
+            }
+        }
+
+        bb = state.bitboards[WHITE][p];
+        while (bb) {
+            int sq = std::countr_zero(bb);
+            bb &= (bb - 1);
+
+            uint64_t attacks = 0;
+            switch(p) {
+                case KNIGHT: attacks = PreparedData::knight_attack_table[sq]; break;
+                case BISHOP: attacks = MoveGenerator::get_bishop_attacks(sq, occ_all); break;
+                case ROOK:   attacks = MoveGenerator::get_rook_attacks(sq, occ_all); break;
+                case QUEEN:  
+                    attacks = MoveGenerator::get_bishop_attacks(sq, occ_all) 
+                    | MoveGenerator::get_rook_attacks(sq, occ_all); 
+                    break;
+            }
+
+            if (attacks & PreparedData::king_safety_ring_mask_small[black_king_pos]) {
+                black_attackers_count++;
+                black_attack_weight += ATTACK_WEIGHT[p];
+            }
+        }
+    }
+
+    state.allgame_king_safety_score -= white_attackers_count < 2 ? 0.0f : SAFETY_TABLE[white_attack_weight > 19 ? 19 : white_attack_weight]; 
+    state.allgame_king_safety_score += black_attackers_count < 2 ? 0.0f : SAFETY_TABLE[black_attack_weight > 19 ? 19 : black_attack_weight]; 
 }
 
-static inline bool is_end_game_test(GameState& state)
+static inline void recalculate_safe_mobility_score(GameState& state)
 {
-    uint64_t figures_on_board = std::popcount(state.total_occupancy) - std::popcount(state.bitboards[WHITE][PAWN] | state.bitboards[BLACK][PAWN]);
-    return figures_on_board <= 4;
+    state.safe_mobility_score = 0.0f;
+    uint64_t occ_all = state.occupancy[WHITE] | state.occupancy[BLACK];
+
+    uint64_t white_pawn_attacks = get_pawn_attacks_mask(WHITE, state.bitboards[WHITE][PAWN]);
+    uint64_t black_pawn_attacks = get_pawn_attacks_mask(BLACK, state.bitboards[BLACK][PAWN]);
+
+    uint64_t white_safe_squares = ~state.occupancy[WHITE] & ~black_pawn_attacks;
+
+    for (int p = KNIGHT; p <= QUEEN; ++p) {
+        uint64_t bb = state.bitboards[WHITE][p];
+        while (bb) {
+            int sq = std::countr_zero(bb);
+            bb &= (bb - 1);
+
+            uint64_t attacks = 0;
+            switch(p) {
+                case KNIGHT: attacks = PreparedData::knight_attack_table[sq]; break;
+                case BISHOP: attacks = MoveGenerator::get_bishop_attacks(sq, occ_all); break;
+                case ROOK:   attacks = MoveGenerator::get_rook_attacks(sq, occ_all); break;
+                case QUEEN:  attacks = MoveGenerator::get_bishop_attacks(sq, occ_all) | MoveGenerator::get_rook_attacks(sq, occ_all); break;
+            }
+
+            uint64_t valid_moves = attacks & white_safe_squares;
+            int mobility = std::popcount(valid_moves);
+
+            state.safe_mobility_score += mobility * MOBILITY_BONUS[p];
+        }
+    }
+
+    uint64_t black_safe_squares = ~state.occupancy[BLACK] & ~white_pawn_attacks;
+
+    for (int p = KNIGHT; p <= QUEEN; ++p) {
+        uint64_t bb = state.bitboards[BLACK][p];
+        while (bb) {
+            int sq = std::countr_zero(bb);
+            bb &= (bb - 1);
+
+            uint64_t attacks = 0;
+            switch(p) {
+                case KNIGHT: attacks = PreparedData::knight_attack_table[sq]; break;
+                case BISHOP: attacks = MoveGenerator::get_bishop_attacks(sq, occ_all); break;
+                case ROOK:   attacks = MoveGenerator::get_rook_attacks(sq, occ_all); break;
+                case QUEEN:  attacks = MoveGenerator::get_bishop_attacks(sq, occ_all) | MoveGenerator::get_rook_attacks(sq, occ_all); break;
+            }
+
+            uint64_t valid_moves = attacks & black_safe_squares;
+            int mobility = std::popcount(valid_moves);
+
+            state.safe_mobility_score -= mobility * MOBILITY_BONUS[p];
+        }
+    }
 }
+
+static inline void recalculate_development_score(GameState& state)
+{
+    state.early_game_development_score = 0.0f;
+    state.mid_game_development_score = 0.0f;
+
+
+    // 1. Sleeping pieces
+
+    uint64_t undeveloped_white_pieces = (state.bitboards[WHITE][BISHOP] & 0x0000000000000024ULL)
+                                        | (state.bitboards[WHITE][KNIGHT] & 0x0000000000000042ULL)
+                                        | (state.bitboards[WHITE][KNIGHT] & 0x0000000000000042ULL);
+
+    uint64_t undeveloped_black_pieces = (state.bitboards[BLACK][BISHOP] & 0x2400000000000000ULL)
+                                        | (state.bitboards[BLACK][KNIGHT] & 0x4200000000000000ULL)
+                                        | (state.bitboards[BLACK][KNIGHT] & 0x4200000000000000ULL);
+
+    state.mid_game_development_score -= 
+        (std::popcount(undeveloped_white_pieces) 
+        - std::popcount(undeveloped_black_pieces)) * 100.0f;
+
+
+    // 2. Early Queen move
+    state.early_game_development_score -= 
+        (std::popcount(state.bitboards[WHITE][QUEEN] & 0x00ffffffffffff00)
+        - std::popcount(state.bitboards[BLACK][QUEEN] & 0x00ffffffffffff00)) * QUEEN_EARLY_DEVELOPMENT_PENALTY;
+}
+
+static inline void recalculate_piece_activity(GameState& state)
+{
+    state.active_piece_score = 0.0f;
+
+    uint64_t black_pawn_attacks = get_pawn_attacks_mask(BLACK, state.bitboards[BLACK][PAWN]);
+    uint64_t white_pawn_attacks = get_pawn_attacks_mask(WHITE, state.bitboards[WHITE][PAWN]);
+    
+    // 1. Piece safety / threats
+    uint64_t threat_penalty_white = 
+            std::popcount(state.bitboards[WHITE][KNIGHT] & black_pawn_attacks) * 0.40f
+        +   std::popcount(state.bitboards[WHITE][BISHOP] & black_pawn_attacks) * 0.40f
+        +   std::popcount(state.bitboards[WHITE][ROOK] & black_pawn_attacks) * 0.60f
+        +   std::popcount(state.bitboards[WHITE][QUEEN] & black_pawn_attacks) * 0.80f;
+
+    uint64_t threat_penalty_black = 
+            std::popcount(state.bitboards[BLACK][KNIGHT] & white_pawn_attacks) * 0.40f
+        +   std::popcount(state.bitboards[BLACK][BISHOP] & white_pawn_attacks) * 0.40f
+        +   std::popcount(state.bitboards[BLACK][ROOK] & white_pawn_attacks) * 0.60f
+        +   std::popcount(state.bitboards[BLACK][QUEEN] & white_pawn_attacks) * 0.80f;
+
+    state.active_piece_score -= (threat_penalty_white - threat_penalty_black) * 100.0f;
+
+    // 2. Bishop pair
+    state.active_piece_score += std::popcount(state.bitboards[WHITE][BISHOP]) > 2 ? 50.0f : 0.0f;
+    state.active_piece_score -= std::popcount(state.bitboards[BLACK][BISHOP]) > 2 ? 50.0f : 0.0f;
+
+    // 3. 7th and 2nd rank rooks
+    state.active_piece_score += 
+        (std::popcount(state.bitboards[WHITE][ROOK] & 0x00FF000000000000ULL) 
+        - std::popcount(state.bitboards[BLACK][ROOK] & 0x000000000000FF00ULL)) * 40.0f;
+}
+
+static inline void recalculate_space_advantage(GameState& state)
+{
+    state.space_advantage_score = 0.0f;
+
+    constexpr uint64_t RANK_3 = 0x0000000000FF0000ULL;
+    constexpr uint64_t RANK_4 = 0x00000000FF000000ULL;
+    constexpr uint64_t RANK_5 = 0x000000FF00000000ULL;
+    constexpr uint64_t RANK_6 = 0x0000FF0000000000ULL;
+
+    constexpr uint64_t FILE_A = 0x0101010101010101ULL;
+
+    uint64_t white_pawns = state.bitboards[WHITE][PAWN];
+    uint64_t black_pawns = state.bitboards[BLACK][PAWN];
+
+    // WHITE
+    uint64_t w_rank4 = white_pawns & RANK_4;
+    uint64_t w_rank5 = white_pawns & RANK_5;
+    uint64_t w_rank6 = white_pawns & RANK_6;
+
+    state.space_advantage_score += std::popcount(w_rank4) * 50.0f;
+    state.space_advantage_score += std::popcount(w_rank5) * 100.0f;
+    state.space_advantage_score += std::popcount(w_rank6) * 200.0f;
+
+
+    uint64_t w_phalanx = white_pawns & ((white_pawns & ~FILE_A) >> 1);
+    state.space_advantage_score += std::popcount(w_phalanx) * 50.0f;
+
+    // BLACK
+    uint64_t b_rank4 = black_pawns & RANK_5; 
+    uint64_t b_rank5 = black_pawns & RANK_4; 
+    uint64_t b_rank6 = black_pawns & RANK_3; 
+
+    state.space_advantage_score -= std::popcount(b_rank4) * 50.0f;
+    state.space_advantage_score -= std::popcount(b_rank5) * 100.0f;
+    state.space_advantage_score -= std::popcount(b_rank6) * 200.0f;
+
+    // Falanga Czarnych
+    uint64_t b_phalanx = black_pawns & ((black_pawns & ~FILE_A) >> 1);
+    state.space_advantage_score -= std::popcount(b_phalanx) * 50.0f;
+}
+
+void apply_pst_move(GameState& state, ChessPiece piece, int64_t from, int64_t to)
+{
+    Color us = state.aux.get_turn();
+
+    state.mid_game_score[us] -= PreparedData::mg_pst_table[us][piece][from];
+    state.end_game_score[us] -= PreparedData::eg_pst_table[us][piece][from];
+
+    state.mid_game_score[us] += PreparedData::mg_pst_table[us][piece][to];
+    state.end_game_score[us] += PreparedData::eg_pst_table[us][piece][to];
+}
+
+void apply_pst_capture(GameState& state, ChessPiece piece, int64_t from)
+{
+    Color them = static_cast<Color>(!state.aux.get_turn());
+
+    state.mid_game_score[them] -= PreparedData::mg_pst_table[them][piece][from];
+    state.end_game_score[them] -= PreparedData::eg_pst_table[them][piece][from];
+
+    state.game_phase -= gamephase_inc[piece];
+}
+
+void apply_pst_promotion(GameState& state, ChessPiece piece_from, ChessPiece piece_to, int64_t square)
+{
+    Color us = state.aux.get_turn();
+
+    state.mid_game_score[us] -= PreparedData::mg_pst_table[us][piece_from][square];
+    state.end_game_score[us] -= PreparedData::eg_pst_table[us][piece_from][square];
+
+    state.mid_game_score[us] += PreparedData::mg_pst_table[us][piece_to][square];
+    state.end_game_score[us] += PreparedData::eg_pst_table[us][piece_to][square];
+
+    state.game_phase -= gamephase_inc[piece_from]; 
+    state.game_phase += gamephase_inc[piece_to];
+}
+
 
 bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
 {
@@ -146,10 +384,6 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
     bool old_has_ep = Zobrist::is_polyglot_ep_active(state);
     int old_ep_file = state.aux.can_en_passant() ? (state.aux.en_passant_square() % 8) : 0;
 
-    bool is_end_game = is_end_game_test(state);
-
-    float new_evaluation_score = state.evaluation_score;
-
     int64_t from = move.get_from();
     int64_t to = move.get_to();
     uint64_t from_mask = 1ULL << from;
@@ -164,13 +398,7 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
     }
 
     // Add and Remove score for positional change (PSTs)
-    new_evaluation_score += us == WHITE ? 
-        PST_TABLE[is_end_game][moving_piece][to ^ 56] * PST_MULTIPLIER_TABLE[is_end_game][moving_piece]
-        : -PST_TABLE[is_end_game][moving_piece][to] * PST_MULTIPLIER_TABLE[is_end_game][moving_piece];
-    
-    new_evaluation_score -= us == WHITE ? 
-        PST_TABLE[is_end_game][moving_piece][from ^ 56] * PST_MULTIPLIER_TABLE[is_end_game][moving_piece] 
-        : -PST_TABLE[is_end_game][moving_piece][from] * PST_MULTIPLIER_TABLE[is_end_game][moving_piece];
+    apply_pst_move(state, moving_piece, from, to);
 
     bool is_capture = state.occupancy[them] & to_mask;
     ChessPiece captured_piece = PAWN;
@@ -182,13 +410,8 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
             }
         }
 
-        // Add score for material change
-        new_evaluation_score += us == WHITE ? CHESS_PIECE_VALUES[captured_piece] : -CHESS_PIECE_VALUES[captured_piece];
-
         // Remove score for positional change (PSTs)
-        new_evaluation_score -= them == WHITE ? 
-            PST_TABLE[is_end_game][captured_piece][to ^ 56] * PST_MULTIPLIER_TABLE[is_end_game][captured_piece]: 
-            -PST_TABLE[is_end_game][captured_piece][to] * PST_MULTIPLIER_TABLE[is_end_game][captured_piece];
+        apply_pst_capture(state, captured_piece, to);
     }
 
     // AUX DATA
@@ -226,6 +449,8 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
             // Not "is capture" but still ended up on en passant square
             int capture_sq = (us == WHITE) ? (to - 8) : (to + 8);
             state.bitboards[them][PAWN] ^= (1ULL << capture_sq);
+
+            apply_pst_capture(state, PAWN, capture_sq);
         }
         // C. Promotion
         else if (move.has_promotion()) {
@@ -233,11 +458,7 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
             state.bitboards[us][PAWN] ^= to_mask; //  Remove the pawn
             state.bitboards[us][move.get_promotion()] ^= to_mask; // Add new piece
 
-            new_evaluation_score -= us == WHITE ? CHESS_PIECE_VALUES[PAWN] : -CHESS_PIECE_VALUES[PAWN];
-            new_evaluation_score += us == WHITE ? CHESS_PIECE_VALUES[move.get_promotion()] : -CHESS_PIECE_VALUES[move.get_promotion()];
-
-            new_evaluation_score -= us == WHITE ? PST_TABLE[is_end_game][PAWN][to ^ 56] : -PST_TABLE[is_end_game][PAWN][to];
-            new_evaluation_score += us == WHITE ? PST_TABLE[is_end_game][move.get_promotion()][to ^ 56] : -PST_TABLE[is_end_game][move.get_promotion()][to];
+            apply_pst_promotion(state, PAWN, move.get_promotion(), to);
         }
     } 
     else if (moving_piece == KING) {
@@ -246,10 +467,13 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
             // (almost) Unreadable cluster of operations, let's hope it works
             if (to == 6 || to == 62) { // Short castle
                 state.bitboards[us][ROOK] ^= (1ULL << (to + 1)) | (1ULL << (to - 1)); // (H->F)
+                apply_pst_move(state, ROOK, to + 1, to - 1);
             } else if (to == 2 || to == 58) { // Long castle
                 state.bitboards[us][ROOK] ^= (1ULL << (to - 2)) | (1ULL << (to + 1)); // (A->D)
+                apply_pst_move(state, ROOK, to - 2, to + 1);
             }
-            new_evaluation_score += (!is_end_game) * (us == WHITE ? CHESS_PIECE_VALUES[PAWN] * 2 : -CHESS_PIECE_VALUES[PAWN] * 2);
+
+            // Comment this out: PST tables should reward us for castling
         }
 
         if (us == WHITE) {
@@ -302,8 +526,6 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
         state.aux.full_move_count() + (us == BLACK ? 1 : 0)
     );
 
-    state.evaluation_score = new_evaluation_score;
-
     if (us == WHITE && MoveGenerator::is_our_king_in_check<WHITE>(state)) {
         return false;
     } else if (us == BLACK && MoveGenerator::is_our_king_in_check<BLACK>(state)) {
@@ -312,6 +534,10 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
 
     recalculate_pawn_structure_score(state);
     recalculate_king_safety_score(state);
+    recalculate_safe_mobility_score(state);
+    recalculate_development_score(state);
+    recalculate_piece_activity(state);
+    recalculate_space_advantage(state);
 
     if (us == WHITE) {
         state.is_checked = MoveGenerator::is_our_king_in_check<BLACK>(state);
@@ -367,5 +593,73 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
         state.zobrist_key ^= Zobrist::en_passant_keys[state.aux.en_passant_square() % 8];
     }
     
+    // Reevaluate game phase
+    state.recalc_phase_scores();
+
     return true;
+}
+
+bool StateTransformer::is_king_attacked_after_move(const GameState& state, const ChessMove& move)
+{
+    Color us = state.aux.get_turn();
+    Color them = static_cast<Color>(!us);
+    
+    int from = move.get_from();
+    int to = move.get_to();
+    int enemy_king_sq = std::countr_zero(state.bitboards[them][KING]);
+
+    ChessPiece piece = PAWN;
+    for (int p = 0; p < 6; p++) {
+        if (state.bitboards[us][p] & (1ULL << from)) {
+            piece = static_cast<ChessPiece>(p);
+            break;
+        }
+    }
+
+    ChessPiece piece_on_to = move.has_promotion() ? move.get_promotion() : piece;
+
+    uint64_t occ_after = (state.occupancy[WHITE] | state.occupancy[BLACK]);
+    occ_after = (occ_after ^ (1ULL << from)) | (1ULL << to);
+
+    bool is_en_passant = (piece == PAWN && !move.has_promotion() && move.get_promotion() == KNIGHT && to == state.aux.en_passant_square());
+    if (is_en_passant) {
+        int captured_pawn_sq = (us == WHITE) ? to - 8 : to + 8;
+        occ_after ^= (1ULL << captured_pawn_sq);
+    }
+
+    bool direct_check = false;
+    switch (piece_on_to) {
+        case PAWN: {
+            if (PreparedData::pawns_attack_table[us][to] & (1ULL << enemy_king_sq)) direct_check = true;
+            break;
+        }
+        case KNIGHT:
+            if (PreparedData::knight_attack_table[to] & (1ULL << enemy_king_sq)) direct_check = true;
+            break;
+        case BISHOP:
+            if (MoveGenerator::get_bishop_attacks(to, occ_after) & (1ULL << enemy_king_sq)) direct_check = true;
+            break;
+        case ROOK:
+            if (MoveGenerator::get_rook_attacks(to, occ_after) & (1ULL << enemy_king_sq)) direct_check = true;
+            break;
+        case QUEEN:
+            if (MoveGenerator::get_bishop_attacks(to, occ_after) & (1ULL << enemy_king_sq)) direct_check = true;
+            if (MoveGenerator::get_rook_attacks(to, occ_after) & (1ULL << enemy_king_sq)) direct_check = true;
+            break;
+        default: break; 
+    }
+
+    if (direct_check) return true;
+
+    uint64_t our_diagonals = (state.bitboards[us][BISHOP] | state.bitboards[us][QUEEN]) & ~(1ULL << from);
+    if (our_diagonals) {
+        if (MoveGenerator::get_bishop_attacks(enemy_king_sq, occ_after) & our_diagonals) return true;
+    }
+
+    uint64_t our_straights = (state.bitboards[us][ROOK] | state.bitboards[us][QUEEN]) & ~(1ULL << from);
+    if (our_straights) {
+        if (MoveGenerator::get_rook_attacks(enemy_king_sq, occ_after) & our_straights) return true;
+    }
+
+    return false;
 }

@@ -3,8 +3,10 @@
 #include "Engine/MoveRecommender/TTCache.hpp"
 #include "Engine/PreparedData/Zobrist.hpp"
 #include "Engine/StateTransformer/StateTransformer.hpp"
+#include "Engine/Support/ChessMove.hpp"
 #include "Engine/Support/Consts.hpp"
 #include <Engine/MoveRecommender/MoveRecommender.hpp>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <sys/types.h>
@@ -20,12 +22,10 @@ void MoveRecommender::reset_round_timer()
 
 bool MoveRecommender::out_of_time()
 {
+    if ((this->visited_nodes & 2047) != 0) return false;
     auto now = std::chrono::steady_clock::now();
     auto time_passed = std::chrono::duration<double>(now - this->search_start).count();
-    if (time_passed >= this->time_limit * 0.93) {
-        return true;
-    }
-    return false;
+    return time_passed >= this->time_limit * 0.93;
 }
 
 inline static bool has_non_pawn_material(const GameState& state, Color us) {
@@ -35,8 +35,9 @@ inline static bool has_non_pawn_material(const GameState& state, Color us) {
             state.bitboards[us][QUEEN]) != 0;
 }
 
-inline static float quiescence_search(const GameState& state, float alpha, float beta) {
-    float stand_pat = state.evaluation_score;
+float MoveRecommender::quiescence_search(const GameState& state, float alpha, float beta) {
+    float stand_pat = state.eval_position();
+    if (out_of_time()) return state.eval_position();
     
     Color us = state.aux.get_turn();
     Color them = static_cast<Color>(!us);
@@ -57,9 +58,10 @@ inline static float quiescence_search(const GameState& state, float alpha, float
         int to = move.get_to();
         bool is_capture = (state.occupancy[them] & (1ULL << to)) != 0;
         bool is_en_passant = (!is_capture && move.get_promotion() == KNIGHT && !move.has_promotion() && to == state.aux.en_passant_square() && state.aux.can_en_passant());
-        
-        if (is_capture || is_en_passant || move.has_promotion()) {
-            captures.push_back({move, MoveOrdering::score_move(state, move)});
+        bool gives_check = StateTransformer::is_king_attacked_after_move(state, move);
+
+        if (is_capture || is_en_passant || move.has_promotion() || gives_check) {
+            captures.push_back({move, MoveOrdering::score_move(state, move, gives_check)});
         }
     }
 
@@ -69,6 +71,7 @@ inline static float quiescence_search(const GameState& state, float alpha, float
     float best_score = stand_pat; 
 
     for (const auto& sm : captures) {
+        if (out_of_time()) return state.eval_position();
         GameState next_state = state;
         if (!StateTransformer::apply_move(next_state, sm.move)) {
             continue;
@@ -99,6 +102,7 @@ float MoveRecommender::alpha_beta_search(
     float beta,
     bool allow_null
 ) {
+    this->visited_nodes++;
     auto moves = MoveGenerator::generate_pseudo_legal_moves(state);
 
     // The game is lost
@@ -184,9 +188,10 @@ float MoveRecommender::alpha_beta_search(
 
     std::vector<ScoredMove> scored_moves;
     for (auto& move : moves) {
+        bool gives_check = StateTransformer::is_king_attacked_after_move(state, move);
         scored_moves.push_back({
             move, 
-            MoveOrdering::score_move(state, move, depth, tt_move, this->killer_moves, this->history_table)
+            MoveOrdering::score_move(state, move, depth, tt_move, this->killer_moves, this->history_table, gives_check)
         });
     }
     std::sort(scored_moves.begin(), scored_moves.end());
@@ -196,17 +201,40 @@ float MoveRecommender::alpha_beta_search(
     Color us = state.aux.get_turn();
     Color them = static_cast<Color>(!us);
 
-    for (const auto& scored_move : scored_moves) {
-        if (this->out_of_time()) return best_eval;
+    for (ssize_t i = 0; i<scored_moves.size(); i++) {
+        if (this->out_of_time()) return state.eval_position();
+
+        const auto& scored_move = scored_moves[i];
 
         GameState next_state = state;
         if (!StateTransformer::apply_move(next_state, scored_move.move)) {
             continue;
         };
-        
+
+        // LMR logic
+        int to = scored_move.move.get_to();
+        bool is_capture = (state.occupancy[them] & (1ULL << to)) != 0;
+        bool is_promotion = scored_move.move.has_promotion();
+        bool gives_check = StateTransformer::is_king_attacked_after_move(state, scored_move.move);
+        bool is_quiet = !is_capture && !is_promotion && !gives_check;
+        uint64_t check_extension = next_state.is_checked ? 1 : 0;
+        float eval;
+
         history.push_back(state.zobrist_key);
-        float eval = alpha_beta_search(next_state, history, depth - 1, alpha, beta, true);
+        if (depth >= 3 && i >= 3 && is_quiet && !state.is_checked) {
+            int64_t R = 0.75 + std::log(depth) * std::log(i) / 2.25;
+            eval = alpha_beta_search(next_state, history, depth - 1 - R, alpha, beta, true);
+
+            // re-search in case this move turned out to be interesting
+            if ((eval > alpha && us == WHITE) || (eval < beta && us == BLACK)) {
+                eval = alpha_beta_search(next_state, history, depth - 1, alpha, beta, true);
+            }
+
+        } else {
+            eval = alpha_beta_search(next_state, history, depth - 1 + check_extension, alpha, beta, true);
+        }
         history.pop_back();
+        
 
         if (us == BLACK) {
             if (eval < best_eval) {
@@ -271,6 +299,7 @@ std::optional<ChessMove> MoveRecommender::recommend_next_move(
     int min_depth, int 
     max_depth
 ) {
+    this->visited_nodes = 0;
     this->time_limit = time_for_search;
 
     this->clear_heuristics();
@@ -297,9 +326,10 @@ std::optional<ChessMove> MoveRecommender::recommend_next_move(
         std::vector<ScoredMove> scored_moves;
         scored_moves.reserve(moves.size());
         for (auto& move : moves) {
+            bool gives_check = StateTransformer::is_king_attacked_after_move(game_state, move);
             scored_moves.push_back({
                 move, 
-                MoveOrdering::score_move(game_state, move, DEPTH, root_hash_move, this->killer_moves, this->history_table)
+                MoveOrdering::score_move(game_state, move, DEPTH, root_hash_move, this->killer_moves, this->history_table, gives_check)
             });
         }
         std::sort(scored_moves.begin(), scored_moves.end());

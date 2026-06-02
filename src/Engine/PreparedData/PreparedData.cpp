@@ -396,8 +396,48 @@ static inline void calculate_king_safety_ring()
             }
         }
 
-        PreparedData::king_safety_ring_mask[sq] = outer_ring;
+        PreparedData::king_safety_ring_mask_small[sq] = inner_ring;
+        PreparedData::king_safety_ring_mask_big[sq] = inner_ring | outer_ring;
     }
+}
+
+static void calc_pst_tables() 
+{
+    for (int p = 0; p < 6; p++) {
+        for (int sq = 0; sq < 64; sq++) {
+            PreparedData::mg_pst_table[WHITE][p][sq] = pst_mg_value[p] + PST_TABLE[0][p][sq];
+            PreparedData::eg_pst_table[WHITE][p][sq] = pst_eg_value[p] + PST_TABLE[1][p][sq];
+            
+            PreparedData::mg_pst_table[BLACK][p][sq] = pst_mg_value[p] + PST_TABLE[0][p][sq ^ 56];
+            PreparedData::eg_pst_table[BLACK][p][sq] = pst_eg_value[p] + PST_TABLE[1][p][sq ^ 56];
+        }
+    }
+}
+
+static void passed_pawn_calculations()
+{
+    for (int sq = 0; sq < 64; sq++) {
+            int file = sq % 8;
+            int rank = sq / 8;
+
+            uint64_t white_mask = 0ULL;
+            uint64_t black_mask = 0ULL;
+
+            for (int r = rank + 1; r < 8; r++) {
+                white_mask |= (1ULL << (r * 8 + file));
+                if (file > 0) white_mask |= (1ULL << (r * 8 + file - 1));
+                if (file < 7) white_mask |= (1ULL << (r * 8 + file + 1)); 
+            }
+
+            for (int r = rank - 1; r >= 0; r--) {
+                black_mask |= (1ULL << (r * 8 + file));
+                if (file > 0) black_mask |= (1ULL << (r * 8 + file - 1));
+                if (file < 7) black_mask |= (1ULL << (r * 8 + file + 1));
+            }
+
+            PreparedData::passed_pawn_masks[WHITE][sq] = white_mask;
+            PreparedData::passed_pawn_masks[BLACK][sq] = black_mask;
+        }
 }
 
 void PreparedData::run_calculations()
@@ -418,10 +458,16 @@ void PreparedData::run_calculations()
     
     PreparedData::calculate_pawns();
     std::cerr << "calculate_pawns\n";
+
+    passed_pawn_calculations();
+    std::cerr << "passed_pawn_calculations\n";
     
     PreparedData::pawn_structure_masks();
     std::cerr << "pawn_structure_masks\n";
     
     Zobrist::init();
     std::cerr << "Zobrist\n";
+
+    calc_pst_tables();
+    std::cerr << "calc_pst_tables\n";
 };

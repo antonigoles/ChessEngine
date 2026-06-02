@@ -1,3 +1,3 @@
 #!/bin/bash
 
-../build/release/ChessBot
+../build/release/ChessBot 1 8

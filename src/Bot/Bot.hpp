@@ -11,6 +11,7 @@ public:
     bool is_black = false;
     int min_depth = 1;
     int max_depth = 8;
+    Color playing_as;
 
     std::vector<uint64_t> history;
 

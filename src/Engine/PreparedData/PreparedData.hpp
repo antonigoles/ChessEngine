@@ -43,10 +43,17 @@ public:
     inline static Magic bishop_magic_table[64];
 
     inline static uint64_t king_safety_mask[2][64];
+    inline static uint64_t king_safety_mask_further[2][64];
 
-    inline static uint64_t king_safety_ring_mask[64];
+    inline static uint64_t king_safety_ring_mask_small[64];
+    inline static uint64_t king_safety_ring_mask_big[64];
 
     inline static uint64_t isolated_pawn_mask[64];
+
+    inline static int64_t mg_pst_table[2][6][64];
+    inline static int64_t eg_pst_table[2][6][64];
+
+    inline static uint64_t passed_pawn_masks[2][64];
 
     static void run_calculations();
 

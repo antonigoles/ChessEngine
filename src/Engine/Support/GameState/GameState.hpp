@@ -9,9 +9,27 @@
 
 class GameState {
 public:
-    float evaluation_score = 0.0f;
     float pawn_structure_score = 0.0f;
+
+    float midgame_king_safety_score = 0.0f;
+    float allgame_king_safety_score = 0.0f;
     float king_safety_score = 0.0f;
+
+    float early_game_development_score = 0.0f;
+    float mid_game_development_score = 0.0f;
+    float development_score = 0.0f;
+    
+    float safe_mobility_score = 0.0f;
+
+    float active_piece_score = 0.0f;
+
+    float space_advantage_score = 0.0f;
+
+    float mid_game_score[2] = {0.0f, 0.0f}; 
+    float end_game_score[2] = {0.0f, 0.0f}; 
+    int64_t game_phase = 0;
+
+    float pst_score = 0.0f;
 
     bool is_checked = false;
 
@@ -48,15 +66,49 @@ public:
         aux.data = 0;
 
         zobrist_key = 0;
-
-        evaluation_score = 0;
     }
 
     void reset();
 
+    void recalc_phase_scores()
+    {
+        int64_t mg_score_delta = this->mid_game_score[WHITE] - this->mid_game_score[BLACK]; 
+        int64_t eg_score_delta = this->end_game_score[WHITE] - this->end_game_score[BLACK]; 
+
+        int64_t mg_phase = this->game_phase > 24 ? 24 : this->game_phase; 
+        int64_t eg_phase = 24 - mg_phase;
+
+        int64_t final_pst_score = (mg_score_delta * mg_phase + eg_score_delta * eg_phase) / 24;
+        this->pst_score = static_cast<float>(final_pst_score); 
+
+
+        // MID GAME only heuristics
+        float mid_game_phase_weight = static_cast<float>(this->game_phase - 12) / 12.0f;
+        
+        this->king_safety_score = 
+            (this->game_phase >= 12 ? midgame_king_safety_score * mid_game_phase_weight : 0.0f)
+            + this->allgame_king_safety_score;
+
+        this->development_score = this->game_phase >= 12 
+            ? mid_game_development_score * mid_game_phase_weight : 0.0f;
+
+
+        // EARLY GAME ony heuristics
+        float early_game_phase_weight = static_cast<float>(this->game_phase - 20) / 4.0f;
+        this->development_score += this->game_phase >= 20 
+            ? this->early_game_development_score * early_game_phase_weight : 0.0f;
+    }
+
     float eval_position() const
     {
-        return evaluation_score + pawn_structure_score + king_safety_score;
+        return 
+            pawn_structure_score * PAWN_STRUCTURE_SCORE_MULTIPLIER
+            + king_safety_score * KING_SAFETY_SCORE_MULTIPLIER 
+            + pst_score * PST_SCORE_MULTIPLIER
+            + safe_mobility_score * MOBILITY_SCORE_MULTIPLIER
+            + development_score * DEVELOPMENT_SCORE_MULTIPLIER
+            + active_piece_score * ACTIVE_PIECE_MULTIPLIER
+            + space_advantage_score * SPACE_ADVANTAGE_MULTIPLIER;
     }
 
     GameState clone() 

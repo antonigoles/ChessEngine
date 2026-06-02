@@ -17,12 +17,16 @@ private:
     // Format: [Color][From][To]
     int32_t history_table[2][64][64];
 
+    uint64_t visited_nodes = 0;
+
 public:
     MoveRecommender();
 
     bool out_of_time();
 
     void reset_round_timer();
+
+    float quiescence_search(const GameState& state, float alpha, float beta);
 
     float alpha_beta_search(
         const GameState &state,
