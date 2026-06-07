@@ -33,13 +33,7 @@ void Bot::reset() {
 static void print_eval(GameState& state, Color playing_as)
 {
     std::cerr << "Evaluation: (Playing as " << (playing_as == WHITE ? "WHITE": "BLACK") << ")" << state.eval_position() << "\n";
-    std::cerr << " - PST SCORE: " << state.pst_score * PST_SCORE_MULTIPLIER <<  "\n";
-    std::cerr << " - KING SAFETY: " << state.king_safety_score * KING_SAFETY_SCORE_MULTIPLIER <<  "\n";
-    std::cerr << " - PAWN STRUCTURE: " << state.pawn_structure_score * PAWN_STRUCTURE_SCORE_MULTIPLIER <<  "\n";
-    std::cerr << " - MOBILITY: " << state.safe_mobility_score * MOBILITY_SCORE_MULTIPLIER <<  "\n";
-    std::cerr << " - DEVELOPMENT: " << state.development_score * DEVELOPMENT_SCORE_MULTIPLIER <<  "\n";
-    std::cerr << " - ACTIVITY: " << state.active_piece_score * ACTIVE_PIECE_MULTIPLIER <<  "\n";
-    std::cerr << " - SPACE: " << state.space_advantage_score * SPACE_ADVANTAGE_MULTIPLIER <<  "\n";
+    // TODO: Write broader evaluation
 }
 
 std::string Bot::make_first_move(double time_for_move, double time_left) {

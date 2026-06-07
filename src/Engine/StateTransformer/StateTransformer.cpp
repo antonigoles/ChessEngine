@@ -19,19 +19,40 @@ static inline uint64_t get_pawn_attacks_mask(Color color, uint64_t pawns)
 
 static inline void recalculate_pawn_structure_score(GameState& state)
 {
-    state.pawn_structure_score = 0.0f;
+    state.pawn_structure_score.isolated_pawns = 0.0f;
+    state.pawn_structure_score.semi_isolated_pawns = 0.0f;
+    state.pawn_structure_score.passed_pawns = 0.0f;
+    state.pawn_structure_score.doubled_pawns = 0.0f;
     
+    uint64_t white_pawns = state.bitboards[WHITE][PAWN];
+    uint64_t black_pawns = state.bitboards[BLACK][PAWN];
 
-    // 2. Pawn structure itself
+    // Doubled pawns
+    uint64_t w_files = white_pawns;
+    w_files |= w_files >> 32;
+    w_files |= w_files >> 16; 
+    w_files |= w_files >> 8;
+
+    int w_unique_files = std::popcount(w_files & 0xFF);
+    int w_extra_pawns = std::popcount(white_pawns) - w_unique_files;
+    state.pawn_structure_score.doubled_pawns -= w_extra_pawns * 15.0f;
+
+    uint64_t b_files = black_pawns;
+    b_files |= b_files >> 32;
+    b_files |= b_files >> 16;
+    b_files |= b_files >> 8;
+
+    int b_unique_files = std::popcount(b_files & 0xFF);
+    int b_extra_pawns = std::popcount(black_pawns) - b_unique_files;
+    state.pawn_structure_score.doubled_pawns += b_extra_pawns * 15.0f;
 
     // 2a. FIRST WHITE
-    uint64_t white_pawns = state.bitboards[WHITE][PAWN];
     while (white_pawns) {
         int sq = std::countr_zero(white_pawns);
 
         if (!(white_pawns & PreparedData::isolated_pawn_mask[sq])) {
             // Fully isolated
-            state.pawn_structure_score -= 15.0f;
+            state.pawn_structure_score.isolated_pawns -= 15.0f;
         } else {
             // is not isolated or semi-isolated?
             uint64_t support_zone = 
@@ -42,26 +63,26 @@ static inline void recalculate_pawn_structure_score(GameState& state)
 
             if (!(white_pawns & support_zone)) {
                 // Non-pernament orphan aka semi-isolated
-                state.pawn_structure_score -= 8.0f;
+                state.pawn_structure_score.semi_isolated_pawns -= 8.0f;
             }
         }
     
         // Passed pawns
         if ((PreparedData::passed_pawn_masks[WHITE][sq] & state.bitboards[BLACK][PAWN]) == 0) {
-            int rank = sq / 8; // Rząd od 0 do 7
-            state.pawn_structure_score += PASSED_PAWN_BONUS[rank];
+            int rank = sq / 8;
+            state.pawn_structure_score.passed_pawns += PASSED_PAWN_BONUS[rank];
         }
         
         white_pawns &= white_pawns - 1;
     }
 
-    uint64_t black_pawns = state.bitboards[BLACK][PAWN];
+    // 2b. THEN BLACK
     while (black_pawns) {
         int sq = std::countr_zero(black_pawns);
 
         if (!(black_pawns & PreparedData::isolated_pawn_mask[sq])) {
             // Fully isolated
-            state.pawn_structure_score += 15.0f;
+            state.pawn_structure_score.isolated_pawns += 15.0f;
         } else {
             // is not isolated or semi-isolated?
             uint64_t support_zone = 
@@ -72,25 +93,24 @@ static inline void recalculate_pawn_structure_score(GameState& state)
 
             if (!(black_pawns & support_zone)) {
                 // Non-pernament orphan aka semi-isolated
-                state.pawn_structure_score += 8.0f;
+                state.pawn_structure_score.semi_isolated_pawns += 8.0f;
             }
         }
 
         // Passed pawns
         if ((PreparedData::passed_pawn_masks[BLACK][sq] & state.bitboards[WHITE][PAWN]) == 0) {
             int rank = 7 - (sq / 8); 
-            state.pawn_structure_score -= PASSED_PAWN_BONUS[rank];
+            state.pawn_structure_score.passed_pawns -= PASSED_PAWN_BONUS[rank];
         }
     
-        
         black_pawns &= black_pawns - 1;
     }
 }
 
 static inline void recalculate_king_safety_score(GameState& state)
 {
-    state.allgame_king_safety_score = 0.0f;
-    state.midgame_king_safety_score = 0.0f;
+    state.king_safety_score.attackers = 0.0f;
+    state.king_safety_score.pawns_in_front = 0.0f;
 
 
     // 1. Check attacked fields around king depending on piece
@@ -107,15 +127,14 @@ static inline void recalculate_king_safety_score(GameState& state)
     uint64_t shield_mask = PreparedData::king_safety_mask[WHITE][king_pos];
     uint64_t active_shield = shield_mask & state.bitboards[WHITE][PAWN];
     int pawns_in_front = std::popcount(active_shield);
-    state.midgame_king_safety_score += ((float)pawns_in_front - 1.5f) * 50.0f;
+    state.king_safety_score.pawns_in_front += ((float)pawns_in_front - 1.5f) * 50.0f;
 
     // 2a. NOW BLACK
     king_pos = std::countr_zero(state.bitboards[BLACK][KING]);
     shield_mask = PreparedData::king_safety_mask[BLACK][king_pos];
     active_shield = shield_mask & state.bitboards[BLACK][PAWN];
     pawns_in_front = std::popcount(active_shield);
-    state.midgame_king_safety_score += -((float)pawns_in_front - 1.5f) * 50.0f;
-
+    state.king_safety_score.pawns_in_front += -((float)pawns_in_front - 1.5f) * 50.0f;
 
 
     uint64_t occ_all = state.total_occupancy;
@@ -171,8 +190,8 @@ static inline void recalculate_king_safety_score(GameState& state)
         }
     }
 
-    state.allgame_king_safety_score -= white_attackers_count < 2 ? 0.0f : SAFETY_TABLE[white_attack_weight > 19 ? 19 : white_attack_weight]; 
-    state.allgame_king_safety_score += black_attackers_count < 2 ? 0.0f : SAFETY_TABLE[black_attack_weight > 19 ? 19 : black_attack_weight]; 
+    state.king_safety_score.attackers -= white_attackers_count < 2 ? 0.0f : SAFETY_TABLE[white_attack_weight > 19 ? 19 : white_attack_weight]; 
+    state.king_safety_score.attackers += black_attackers_count < 2 ? 0.0f : SAFETY_TABLE[black_attack_weight > 19 ? 19 : black_attack_weight]; 
 }
 
 static inline void recalculate_safe_mobility_score(GameState& state)
@@ -365,6 +384,44 @@ void apply_pst_promotion(GameState& state, ChessPiece piece_from, ChessPiece pie
     state.game_phase += gamephase_inc[piece_to];
 }
 
+void StateTransformer::hard_eval_refresh(GameState& state)
+{
+    recalculate_pawn_structure_score(state);
+    recalculate_king_safety_score(state);
+    recalculate_safe_mobility_score(state);
+    recalculate_development_score(state);
+    recalculate_piece_activity(state);
+    recalculate_space_advantage(state);
+
+    // calculate material balance and gamephase
+    state.mid_game_score[0] = 0.0f;
+    state.mid_game_score[1] = 0.0f;
+    state.end_game_score[0] = 0.0f;
+    state.end_game_score[1] = 0.0f;
+    state.game_phase = 0;
+
+    for (int color = 0; color < 2; ++color) 
+    {
+        for (int piece = 0; piece < 6; ++piece) 
+        {
+            uint64_t bitboard = state.bitboards[color][piece];
+            
+            while (bitboard) 
+            {
+                int sq;
+                sq = std::countr_zero(bitboard);
+                state.mid_game_score[color] += PreparedData::mg_pst_table[color][piece][sq];
+                state.end_game_score[color] += PreparedData::eg_pst_table[color][piece][sq];
+                
+                state.game_phase += gamephase_inc[piece];
+                
+                bitboard &= bitboard - 1; 
+            }
+        }
+    }
+    const int MAX_PHASE = 24; 
+    int current_phase = (state.game_phase > MAX_PHASE) ? MAX_PHASE : state.game_phase;
+}
 
 bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
 {
@@ -593,9 +650,6 @@ bool StateTransformer::apply_move(GameState& state, const ChessMove& move)
         state.zobrist_key ^= Zobrist::en_passant_keys[state.aux.en_passant_square() % 8];
     }
     
-    // Reevaluate game phase
-    state.recalc_phase_scores();
-
     return true;
 }
 

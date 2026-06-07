@@ -7,4 +7,6 @@ class StateTransformer
 public:
     static bool is_king_attacked_after_move(const GameState& state, const ChessMove& move);
     static bool apply_move(GameState& state, const ChessMove& move);
+    static void hard_eval_refresh(GameState& state);
+    static float get_full_eval(GameState& state);
 };

@@ -1,3 +1,5 @@
+#include "Engine/Learning/LearningMutation.hpp"
+#include "Engine/Learning/LearningSession.hpp"
 #include "Engine/MoveGenerator/MoveGenerator.hpp"
 #include "Engine/MoveRecommender/MoveRecommender.hpp"
 #include "Engine/PreparedData/PreparedData.hpp"
@@ -6,6 +8,7 @@
 #include "Tests/Benchmarks.hpp"
 #include "Utils/BitsUtil.hpp"
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <string>
 #include <Bot/Bot.hpp>
@@ -197,6 +200,18 @@ void test_e2e4_d7d5_zobrist_desync() {
     std::cout << "Perft z Apply: " << Benchmarks::perft(state_applied, 2) << "\n";
 }
 
+void training()
+{
+    LearningMutation base_mutation;
+    base_mutation.init_with_local_pst();
+    PreparedData::run_calculations();
+    LearningSession session("/home/antoni/ChessBot/learning_data/E12.33-1M-D12-Resolved.book", 1000000);
+    session.run_spsa_tuning();
+    // session.perform_evolution(base_mutation);
+    // base_mutation.print_mutation();
+    
+}
+
 int main(int argc, char *argv[]) 
 {
     // test_e2e4_d7d5_zobrist_desync();
@@ -205,6 +220,12 @@ int main(int argc, char *argv[])
     // test_game();
     // test_find_the_ghost();
     // return -1;
+
+    // Learn
+    if (argc == 2 && argv[1][0] == 'l') {
+        training();
+        return 0;
+    }
 
     int min_depth = 2;
     int max_depth = 10;

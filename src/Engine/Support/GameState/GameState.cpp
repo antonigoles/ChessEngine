@@ -25,6 +25,4 @@ void GameState::reset()
             }
         }
     }
-
-    this->recalc_phase_scores();
 }
