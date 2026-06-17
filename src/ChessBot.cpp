@@ -1,3 +1,4 @@
+#include "Engine/DynamicArena/AgentArena.hpp"
 #include "Engine/Learning/LearningMutation.hpp"
 #include "Engine/Learning/LearningSession.hpp"
 #include "Engine/MoveGenerator/MoveGenerator.hpp"
@@ -212,6 +213,14 @@ void training()
     
 }
 
+void run_dynamic_agent_arena()
+{
+    PreparedData::run_calculations();
+    AgentArena arena;
+    // arena.start_simple_simulation(100, 0.3f, 0.001f);
+    arena.start_evolution(100, 10, 0.001f);
+}
+
 int main(int argc, char *argv[]) 
 {
     // test_e2e4_d7d5_zobrist_desync();
@@ -219,7 +228,8 @@ int main(int argc, char *argv[])
     // return -1;
     // test_game();
     // test_find_the_ghost();
-    // return -1;
+    run_dynamic_agent_arena();
+    return -1;
 
     // Learn
     if (argc == 2 && argv[1][0] == 'l') {
