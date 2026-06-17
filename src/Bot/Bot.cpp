@@ -70,7 +70,7 @@ std::string Bot::make_move(double time_for_move, double time_left, const std::st
         this->skip_opening_tree = true;
     }
     if (!next_move.has_value()) {
-        next_move = MoveRecommender().recommend_next_move(game_state, get_time_for_search(time_for_move, time_left), history, min_depth, max_depth);
+        next_move = MoveRecommender().recommend_next_move(game_state, get_time_for_search(time_for_move, time_left));
     }
     StateTransformer::apply_move(this->game_state, next_move.value());
     this->game_state.print_position();

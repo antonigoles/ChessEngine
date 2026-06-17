@@ -39,10 +39,7 @@ public:
 
     std::optional<ChessMove> recommend_next_move(
         GameState &game_state, 
-        double time_for_search, 
-        std::vector<uint64_t>& history,
-        int min_depth = 1, 
-        int max_depth = 4
+        double time_for_search
     );
 
     void clear_heuristics() {

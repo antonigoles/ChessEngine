@@ -2,6 +2,6 @@
 set -e
 
 echo "=== KOMPILACJA TRYBU DEBUG ==="
-cmake -B build/debug -DCMAKE_BUILD_TYPE=Debug
+cmake -B build/debug-mcts -DCMAKE_BUILD_TYPE=Debug
 
-cmake --build build/debug
+cmake --build build/debug-mcts

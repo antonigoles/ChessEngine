@@ -106,7 +106,7 @@ public:
         std::cout << "Loaded " << loaded_positions << " positions to learn from.\n";
     }
 
-    const double K = 400.0;
+    const double K = 480.0;
 
     double sigmoid(double eval) const
     {
@@ -153,7 +153,7 @@ public:
 
         for (int piece = 0; piece <= 5; ++piece)
         {
-            float base_val_eg = pst_eg_value[piece]; 
+            float base_val_eg = pst_eg_value[piece];
             
             std::cout << "inline const int64_t eg_" << piece_names[piece] << "_table[64] = {\n";
             
@@ -183,7 +183,7 @@ public:
         const double alpha = 0.602;
         const double gamma = 0.101; 
 
-        const int MAX_ITERATIONS = 10000; // Epoch count
+        const int MAX_ITERATIONS = 50000; // Epoch count
 
         const size_t TOTAL_DATA = learning_base.size();
         const size_t BATCH_SIZE = 100000;

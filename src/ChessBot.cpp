@@ -76,7 +76,7 @@ void test_game()
     std::vector<uint64_t> history;
     while (true) {
         history.push_back(state.zobrist_key);
-        auto next_move = MoveRecommender().recommend_next_move(state, 0.2, history, 1, 7);
+        auto next_move = MoveRecommender().recommend_next_move(state, 0.2);
         if (!next_move.has_value()) break;
         StateTransformer::apply_move(state, *next_move);
         state.print_position();
