@@ -1,0 +1,13 @@
+P0 WON
+P0 WON
+P0 WON
+P0 WON
+P0 WON
+P0 WON
+P0 WON
+P0 WON
+P0 WON
+P0 WON
+Killing subprocess.
+Killing subprocess.
+P0 won-tied-lost 10-0-0 times.
