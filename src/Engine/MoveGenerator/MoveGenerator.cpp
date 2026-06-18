@@ -20,20 +20,6 @@ uint64_t MoveGenerator::get_bishop_attacks(uint64_t from, uint64_t occupancy)
     return InlinedMagic::bishop_magic_table[from].attacks[index];
 }
 
-template <Color Them>
-bool MoveGenerator::is_square_attacked(int sq, const GameState& state) 
-{
-    constexpr Color Us = (Color)!Them; 
-    if (PreparedData::pawns_attack_table[Us][sq] & state.bitboards[Them][PAWN]) return true;
-    if (PreparedData::knight_attack_table[sq] & state.bitboards[Them][KNIGHT]) return true;
-    if (PreparedData::king_attack_table[sq] & state.bitboards[Them][KING]) return true;
-    uint64_t bishop_rays = get_bishop_attacks(sq, state.total_occupancy);
-    if (bishop_rays & (state.bitboards[Them][BISHOP] | state.bitboards[Them][QUEEN])) return true;
-    uint64_t rook_rays = get_rook_attacks(sq, state.total_occupancy);
-    if (rook_rays & (state.bitboards[Them][ROOK] | state.bitboards[Them][QUEEN])) return true;
-    return false;
-}
-
 std::vector<ChessMove> MoveGenerator::generate_pseudo_legal_moves(const GameState& state)
 {
     if (state.aux.get_turn() == WHITE) {

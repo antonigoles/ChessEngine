@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <optional>
 #include <sys/types.h>
+#include <algorithm>
 
 MoveRecommender::MoveRecommender() : time_limit(0.0), tt_cache(64) {
     reset_round_timer();

@@ -229,13 +229,18 @@ int main(int argc, char *argv[])
 
     int min_depth = 2;
     int max_depth = 10;
+    std::string opening_book_path = "/home/antoni/ChessBot/OpeninBooks/komodo.bin";
     if (argc >= 3) {
         min_depth = std::stoi(argv[1]);
         max_depth = std::stoi(argv[2]);
     } 
+
+    if (argc >= 4) {
+        opening_book_path = argv[3];
+    }
     PreparedData::run_calculations();
     // PreparedData::dump_magic();
-    Bot bot(min_depth, max_depth);
+    Bot bot(min_depth, max_depth, opening_book_path);
     StudiaInterface::run(bot);
     return 0;
 }

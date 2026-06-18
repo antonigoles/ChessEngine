@@ -13,10 +13,10 @@ static double get_time_for_search(double time_for_move, double time_left)
     return std::min(time_left * 0.05 + time_for_move * 0.5, time_for_move * 0.66);
 }
 
-Bot::Bot(int min_depth, int max_depth) 
+Bot::Bot(int min_depth, int max_depth, std::string opening_book_path) 
     : min_depth(min_depth), 
     max_depth(max_depth) ,
-    opening_tree(OpeningTree("/home/antoni/ChessBot/OpeninBooks/komodo.bin"))
+    opening_tree(OpeningTree(opening_book_path))
 {
     reset();
     history.reserve(256);

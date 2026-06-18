@@ -15,7 +15,7 @@ public:
 
     std::vector<uint64_t> history;
 
-    Bot(int min_depth, int max_depth);
+    Bot(int min_depth, int max_depth, std::string opening_book_path);
 
     void reset();
 
