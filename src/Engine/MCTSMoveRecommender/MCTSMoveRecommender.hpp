@@ -6,7 +6,7 @@
 class MCTSMoveRecommender
 {
 private:
-    std::chrono::_V2::steady_clock::time_point search_start;
+    std::chrono::steady_clock::time_point search_start;
     double time_limit;
 
 public:
